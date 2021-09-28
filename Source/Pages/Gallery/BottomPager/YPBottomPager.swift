@@ -27,7 +27,9 @@ open class YPBottomPager: UIViewController, UIScrollViewDelegate {
     }
     
     override open func loadView() {
-        v.scrollView.contentInsetAdjustmentBehavior = .never
+        if #available(iOS 11.0, *) {
+            v.scrollView.contentInsetAdjustmentBehavior = .never
+        }
         v.scrollView.delegate = self
         view = v
     }
