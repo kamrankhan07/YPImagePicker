@@ -141,7 +141,7 @@ internal final class YPCameraVC: UIViewController, UIGestureRecognizerDelegate, 
 
         photoCapture.shoot { imageData in
             
-            guard let shotImage = UIImage(data: imageData) else {
+            guard let data = imageData, let shotImage = UIImage(data: data) else {
                 return
             }
             

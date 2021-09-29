@@ -23,25 +23,28 @@ internal final class YPPhotoCaptureHelper: NSObject {
     private let sessionQueue = DispatchQueue(label: "YPPhotoCaptureHelperQueue", qos: .background)
     private let session = AVCaptureSession()
     private var deviceInput: AVCaptureDeviceInput?
-    private let photoOutput = AVCapturePhotoOutput()
+    private var photoOutput: AVCapturePhotoOutput?
     private var isCaptureSessionSetup: Bool = false
     private var isPreviewSetup: Bool = false
     private var previewView: UIView!
     private var videoLayer: AVCaptureVideoPreviewLayer!
-    private var block: ((Data) -> Void)?
+    private var block: ((Data?) -> Void)?
     private var initVideoZoomFactor: CGFloat = 1.0
 }
 
 // MARK: - Public
 
 extension YPPhotoCaptureHelper {
-    func shoot(completion: @escaping (Data) -> Void) {
+    func shoot(completion: @escaping (Data?) -> Void) {
+        guard let photoOutput = self.photoOutput, let settings = photoCaptureSettings() else {
+            completion(nil)
+            return
+        }
         block = completion
         
         // Set current device orientation
         setCurrentOrienation()
         
-        let settings = photoCaptureSettings()
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
     
@@ -120,7 +123,10 @@ extension YPPhotoCaptureHelper {
 extension YPPhotoCaptureHelper: AVCapturePhotoCaptureDelegate {
     @available(iOS 11.0, *)
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard let data = photo.fileDataRepresentation() else { return }
+        guard let data = photo.fileDataRepresentation() else {
+            block?(nil)
+            return
+        }
         block?(data)
     }
     
@@ -130,7 +136,10 @@ extension YPPhotoCaptureHelper: AVCapturePhotoCaptureDelegate {
                      resolvedSettings: AVCaptureResolvedPhotoSettings,
                      bracketSettings: AVCaptureBracketedStillImageSettings?,
                      error: Error?) {
-        guard let buffer = photoSampleBuffer else { return }
+        guard let buffer = photoSampleBuffer else {
+            block?(nil)
+            return
+        }
         if let data = AVCapturePhotoOutput
             .jpegPhotoDataRepresentation(forJPEGSampleBuffer: buffer,
                                          previewPhotoSampleBuffer: previewPhotoSampleBuffer) {
@@ -144,7 +153,9 @@ private extension YPPhotoCaptureHelper {
     
     // MARK: Setup
     
-    private func photoCaptureSettings() -> AVCapturePhotoSettings {
+    private func photoCaptureSettings() -> AVCapturePhotoSettings? {
+        guard let photoOutput = self.photoOutput else { return nil }
+        
         var settings = AVCapturePhotoSettings()
         
         // Catpure Heif when available.
@@ -184,22 +195,28 @@ private extension YPPhotoCaptureHelper {
     private func setupCaptureSession() {
         session.beginConfiguration()
         session.sessionPreset = .photo
+       
         let cameraPosition: AVCaptureDevice.Position = YPConfig.usesFrontCamera ? .front : .back
-        let aDevice = deviceForPosition(cameraPosition)
-        if let d = aDevice {
-            deviceInput = try? AVCaptureDeviceInput(device: d)
-        }
-        if let videoInput = deviceInput {
-            if session.canAddInput(videoInput) {
-                session.addInput(videoInput)
+        if let device = deviceForPosition(cameraPosition) {
+            photoOutput = AVCapturePhotoOutput()
+            deviceInput = try? AVCaptureDeviceInput(device: device)
+            
+            if let videoInput = deviceInput {
+                if session.canAddInput(videoInput) {
+                    session.addInput(videoInput)
+                }
             }
-            if session.canAddOutput(photoOutput) {
-                session.addOutput(photoOutput)
-                photoOutput.isHighResolutionCaptureEnabled = true
+            
+            if session.canAddOutput(photoOutput!) {
+                session.addOutput(photoOutput!)
+                photoOutput?.isHighResolutionCaptureEnabled = true
                 // Improve capture time by preparing output with the desired settings.
-                photoOutput.setPreparedPhotoSettingsArray([photoCaptureSettings()], completionHandler: nil)
+                if let settings = photoCaptureSettings() {
+                    photoOutput?.setPreparedPhotoSettingsArray([settings], completionHandler: nil)
+                }
             }
         }
+        
         session.commitConfiguration()
         isCaptureSessionSetup = true
     }
@@ -253,6 +270,7 @@ private extension YPPhotoCaptureHelper {
     }
     
     private func setCurrentOrienation() {
+        guard let photoOutput = self.photoOutput else { return }
         let connection = photoOutput.connection(with: .video)
         let orientation = YPDeviceOrientationHelper.shared.currentDeviceOrientation
         switch orientation {
